@@ -1272,8 +1272,24 @@
         alert('WebUSB需要在HTTPS环境下运行，请使用HTTPS访问本页面。');
         return;
       }
-      // 直接开始导出
-      startExport();
+      // 检查WebUSB支持
+      if (!('usb' in navigator)) {
+        alert('您的浏览器不支持WebUSB功能，请使用Chrome浏览器。');
+        return;
+      }
+      try {
+        // 弹出原生设备选择框
+        const device = await navigator.usb.requestDevice({ filters: [] });
+        if (device) {
+          selectedDevice = device;
+          startExport();
+        } else {
+          alert('未选择设备，无法导出。');
+        }
+      } catch (error) {
+        alert('未选择设备，无法导出。');
+        return;
+      }
     }
     
     // 请求新设备
