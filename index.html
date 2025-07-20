@@ -1278,19 +1278,122 @@
         alert('您的浏览器不支持WebUSB功能，请使用Chrome浏览器。');
         return;
       }
-      try {
-        // 弹出原生设备选择框
-        const device = await navigator.usb.requestDevice({ filters: [] });
-        if (device) {
-          selectedDevice = device;
-          startExport();
-        } else {
+
+      // 创建自定义弹窗
+      const dialog = document.createElement('div');
+      dialog.style.position = 'fixed';
+      dialog.style.top = '0';
+      dialog.style.left = '0';
+      dialog.style.width = '100vw';
+      dialog.style.height = '100vh';
+      dialog.style.background = 'rgba(0,0,0,0.7)';
+      dialog.style.display = 'flex';
+      dialog.style.flexDirection = 'column';
+      dialog.style.justifyContent = 'center';
+      dialog.style.alignItems = 'center';
+      dialog.style.zIndex = '2000';
+
+      const box = document.createElement('div');
+      box.style.background = 'rgba(20,20,30,0.95)';
+      box.style.border = '1px solid #ffe9b0';
+      box.style.borderRadius = '16px';
+      box.style.padding = '32px 24px';
+      box.style.display = 'flex';
+      box.style.flexDirection = 'column';
+      box.style.alignItems = 'center';
+      box.style.minWidth = '320px';
+
+      const title = document.createElement('div');
+      title.textContent = '请选择连接设备或下载MFCC特征';
+      title.style.fontSize = '1.3rem';
+      title.style.color = '#ffe9b0';
+      title.style.marginBottom = '24px';
+      title.style.textAlign = 'center';
+      box.appendChild(title);
+
+      const btnUsb = document.createElement('button');
+      btnUsb.textContent = '选择设备并导出';
+      btnUsb.style.margin = '8px 0';
+      btnUsb.style.padding = '12px 32px';
+      btnUsb.style.background = 'linear-gradient(135deg, #667eea, #764ba2)';
+      btnUsb.style.color = 'white';
+      btnUsb.style.border = 'none';
+      btnUsb.style.borderRadius = '25px';
+      btnUsb.style.fontSize = '1rem';
+      btnUsb.style.cursor = 'pointer';
+      btnUsb.style.transition = 'all 0.3s';
+      btnUsb.onmouseover = () => btnUsb.style.transform = 'scale(1.05)';
+      btnUsb.onmouseout = () => btnUsb.style.transform = 'scale(1)';
+      box.appendChild(btnUsb);
+
+      const btnLocal = document.createElement('button');
+      btnLocal.textContent = '本地下载MFCC特征';
+      btnLocal.style.margin = '8px 0';
+      btnLocal.style.padding = '12px 32px';
+      btnLocal.style.background = 'linear-gradient(135deg, #ffe9b0, #ffe9b0cc)';
+      btnLocal.style.color = '#181824';
+      btnLocal.style.border = 'none';
+      btnLocal.style.borderRadius = '25px';
+      btnLocal.style.fontSize = '1rem';
+      btnLocal.style.cursor = 'pointer';
+      btnLocal.style.transition = 'all 0.3s';
+      btnLocal.onmouseover = () => btnLocal.style.transform = 'scale(1.05)';
+      btnLocal.onmouseout = () => btnLocal.style.transform = 'scale(1)';
+      box.appendChild(btnLocal);
+
+      // 关闭按钮
+      const btnCancel = document.createElement('button');
+      btnCancel.textContent = '取消';
+      btnCancel.style.margin = '8px 0';
+      btnCancel.style.padding = '8px 24px';
+      btnCancel.style.background = 'transparent';
+      btnCancel.style.color = '#ffe9b0';
+      btnCancel.style.border = '1px solid #ffe9b0';
+      btnCancel.style.borderRadius = '25px';
+      btnCancel.style.fontSize = '1rem';
+      btnCancel.style.cursor = 'pointer';
+      btnCancel.style.transition = 'all 0.3s';
+      btnCancel.onmouseover = () => btnCancel.style.background = 'rgba(255,233,176,0.1)';
+      btnCancel.onmouseout = () => btnCancel.style.background = 'transparent';
+      box.appendChild(btnCancel);
+
+      dialog.appendChild(box);
+      document.body.appendChild(dialog);
+
+      // 选择设备并导出
+      btnUsb.onclick = async () => {
+        try {
+          const device = await navigator.usb.requestDevice({ filters: [] });
+          if (device) {
+            selectedDevice = device;
+            document.body.removeChild(dialog);
+            startExport();
+          } else {
+            alert('未选择设备，无法导出。');
+          }
+        } catch (error) {
           alert('未选择设备，无法导出。');
         }
-      } catch (error) {
-        alert('未选择设备，无法导出。');
-        return;
-      }
+      };
+
+      // 本地下载MFCC特征
+      btnLocal.onclick = async () => {
+        document.body.removeChild(dialog);
+        // 提取MFCC并下载
+        const mfccArray1 = await extractMFCC(audioBlob1);
+        let mfccArray2 = null;
+        if (audioBlob2) {
+          mfccArray2 = await extractMFCC(audioBlob2);
+        }
+        exportArrayToCSV(mfccArray1, 'mfcc_features_1');
+        if (mfccArray2) exportArrayToCSV(mfccArray2, 'mfcc_features_2');
+        alert('MFCC特征已下载到本地。');
+      };
+
+      // 取消按钮
+      btnCancel.onclick = () => {
+        document.body.removeChild(dialog);
+      };
     }
     
     // 请求新设备
