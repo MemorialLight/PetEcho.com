@@ -548,6 +548,7 @@
       .searching-text { font-size: 1.4rem; }
     }
   </style>
+  <script src="https://unpkg.com/meyda/dist/web/meyda.min.js"></script>
 </head>
 <body>
   <canvas class="star-bg" id="starBg"></canvas>
@@ -671,7 +672,7 @@
   
   <script>
     // 调试模式变量
-    let DEBUG_MODE = true; // 设置为true启用调试模式，false为正常模式
+    let DEBUG_MODE = false; // 设置为true启用调试模式，false为正常模式
     
     // 多语言配置
     const translations = {
@@ -1266,78 +1267,13 @@
     
     // 显示设备选择
     async function showDeviceSelection() {
-      deviceSelection.style.display = 'flex';
-      
-      if (DEBUG_MODE) {
-        console.log('调试模式：显示模拟设备');
-        showMockDevices();
-        return;
-      }
-      
-      // 检查WebUSB支持
-      if (!('usb' in navigator)) {
-        alert('您的浏览器不支持WebUSB功能，请使用Chrome浏览器');
-        showMockDevices();
-        return;
-      }
-      
       // 检查HTTPS环境
       if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-        alert('WebUSB需要在HTTPS环境下运行');
-        showMockDevices();
+        alert('WebUSB需要在HTTPS环境下运行，请使用HTTPS访问本页面。');
         return;
       }
-      
-      try {
-        // 尝试获取已连接的设备
-        const devices = await navigator.usb.getDevices();
-        
-        if (devices.length > 0) {
-          // 显示已连接的设备
-          const deviceList = document.getElementById('deviceList');
-          deviceList.innerHTML = '';
-          
-          devices.forEach(device => {
-            const deviceItem = document.createElement('div');
-            deviceItem.className = 'device-item';
-            deviceItem.innerHTML = `
-              <h3>${device.productName || '未知设备'}</h3>
-              <p>厂商: ${device.manufacturerName || '未知'}</p>
-              <p>状态: 已连接</p>
-            `;
-            deviceItem.addEventListener('click', () => selectDevice(device));
-            deviceList.appendChild(deviceItem);
-          });
-          
-          // 添加选择新设备的选项
-          const newDeviceItem = document.createElement('div');
-          newDeviceItem.className = 'device-item';
-          newDeviceItem.innerHTML = `
-            <h3>选择新设备</h3>
-            <p>连接新的USB设备</p>
-            <p>状态: 点击选择</p>
-          `;
-          newDeviceItem.addEventListener('click', requestNewDevice);
-          deviceList.appendChild(newDeviceItem);
-        } else {
-          // 没有已连接设备，显示选择新设备选项
-          const deviceList = document.getElementById('deviceList');
-          deviceList.innerHTML = '';
-          
-          const newDeviceItem = document.createElement('div');
-          newDeviceItem.className = 'device-item';
-          newDeviceItem.innerHTML = `
-            <h3>选择USB设备</h3>
-            <p>请连接并选择USB设备</p>
-            <p>状态: 点击选择</p>
-          `;
-          newDeviceItem.addEventListener('click', requestNewDevice);
-          deviceList.appendChild(newDeviceItem);
-        }
-      } catch (error) {
-        console.error('获取设备失败:', error);
-        showMockDevices();
-      }
+      // 直接开始导出
+      startExport();
     }
     
     // 请求新设备
@@ -1419,6 +1355,57 @@
       URL.revokeObjectURL(url);
     }
     
+    // 提取标准 MFCC 特征（13维，含能量，帧长512，帧移256，26梅尔滤波器）
+    async function extractMFCC(audioBlob) {
+      const arrayBuffer = await audioBlob.arrayBuffer();
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      const channelData = audioBuffer.getChannelData(0); // 单声道
+
+      const frameSize = 512;
+      const hopSize = 256;
+      const mfccFeatures = 13;
+      const melBands = 26;
+
+      // 汉宁窗
+      const hannWindow = Array.from({length: frameSize}, (_, n) =>
+        0.5 * (1 - Math.cos((2 * Math.PI * n) / (frameSize - 1)))
+      );
+
+      const mfccs = [];
+      for (let i = 0; i <= channelData.length - frameSize; i += hopSize) {
+        let frame = channelData.slice(i, i + frameSize);
+        // 加窗
+        frame = frame.map((v, idx) => v * hannWindow[idx]);
+        // 计算帧能量（第0维）
+        const energy = Math.sqrt(frame.reduce((sum, v) => sum + v * v, 0) / frame.length);
+        // MFCC 提取（meyda 默认第0维不是能量，这里手动插入）
+        const mfcc = Meyda.extract('mfcc', frame, {
+          sampleRate: audioCtx.sampleRate,
+          bufferSize: frameSize,
+          melBands: melBands,
+          numberOfMFCCCoefficients: mfccFeatures - 1 // 只取12维
+        });
+        mfccs.push([energy, ...mfcc.slice(0, 12)]); // [能量, 1-12维]
+      }
+      // 展平成一维数组
+      return mfccs.flat();
+    }
+
+    // 导出为 CSV
+    function exportArrayToCSV(arr, filename) {
+      const csv = arr.join(',');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename + '.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+    
     // 开始导出
     async function startExport() {
       exportPage.style.display = 'flex';
@@ -1439,24 +1426,31 @@
       
       // 启动星星上升效果
       const cleanupStars = createRisingStars();
-      
+
       // 记录开始时间
       const startTime = Date.now();
-      
+
       try {
+        // === 新增：提取 MFCC 特征 ===
+        const mfccArray1 = await extractMFCC(audioBlob1);
+        let mfccArray2 = null;
+        if (audioBlob2) {
+          mfccArray2 = await extractMFCC(audioBlob2);
+        }
+
+        // === 导出为 CSV（可选：WebUSB、本地下载、模拟设备） ===
         if (DEBUG_MODE || (selectedDevice && selectedDevice.isMock)) {
-          // 调试模式或模拟设备
-          console.log('调试模式：模拟导出两个音频文件');
+          // 本地下载
+          exportArrayToCSV(mfccArray1, 'mfcc_features_1');
+          if (mfccArray2) exportArrayToCSV(mfccArray2, 'mfcc_features_2');
           await simulateExport();
         } else if (selectedDevice && selectedDevice.productName) {
-          // 真正的WebUSB设备 - 导出两个音频
-          console.log('WebUSB模式：导出两个音频文件');
-          await exportViaWebUSB(audioBlob1, '星空思念_录音1');
-          if (audioBlob2) {
-            await exportViaWebUSB(audioBlob2, '星空思念_录音2');
+          // WebUSB 导出
+          await exportViaWebUSB(new Blob([new Uint8Array(new TextEncoder().encode(mfccArray1.join(',')))], {type: 'text/csv'}), 'mfcc_features_1.csv');
+          if (mfccArray2) {
+            await exportViaWebUSB(new Blob([new Uint8Array(new TextEncoder().encode(mfccArray2.join(',')))], {type: 'text/csv'}), 'mfcc_features_2.csv');
           }
         } else {
-          // 备用方案
           await simulateExport();
         }
         
@@ -1512,11 +1506,11 @@
       try {
         // 检查WebUSB支持
         if (!('usb' in navigator)) {
-          alert('您的浏览器不支持WebUSB功能，请使用Chrome浏览器并确保在HTTPS环境下运行');
+          alert('您的浏览器不支持WebUSB功能，请使用Chrome浏览器');
           return;
         }
         
-        // 检查是否在安全环境下
+        // 检查HTTPS环境
         if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
           alert('WebUSB需要在HTTPS环境下运行，请使用HTTPS或本地服务器');
           return;
