@@ -1365,6 +1365,24 @@
         try {
           const device = await navigator.usb.requestDevice({ filters: [] });
           if (device) {
+            // 检查设备是否有 OUT 端点
+            await device.open();
+            if (device.configurations.length === 0) {
+              alert('该设备没有可用配置，不支持WebUSB导出。');
+              await device.close();
+              return;
+            }
+            await device.selectConfiguration(device.configurations[0].configurationValue);
+            const interfaces = device.configuration.interfaces;
+            if (
+              interfaces.length === 0 ||
+              !interfaces[0].alternates[0].endpoints.some(ep => ep.direction === 'out')
+            ) {
+              alert('该设备没有可用的数据输出端点，不支持WebUSB导出。');
+              await device.close();
+              return;
+            }
+            // 通过检测，才允许导出
             selectedDevice = device;
             document.body.removeChild(dialog);
             startExport();
